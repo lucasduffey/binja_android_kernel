@@ -12,27 +12,82 @@ from binaryninja import *
 
 #////////////////////////////////////////////////////////////////////////////////////////////
 
+rebase = False
+
 kallsyms = {
-			'arch'		  :32,
-			'_start'		:0,
-			'numsyms'		:0,
-			'address'	   :[],
-			'type'		  :[],
-			'name'		  :[],
-			'address_table'	 : 0,
-			'name_table'		: 0,
-			'type_table'		: 0,
-			'token_table'	   : 0,
-			'table_index_table' : 0,
-			}
+	'arch'		  :32,
+	'_start'		:0,
+	'numsyms'		:0,
+	'address'	   :[],
+	'type'		  :[],
+	'name'		  :[],
+	'address_table'	 : 0,
+	'name_table'		: 0,
+	'type_table'		: 0,
+	'token_table'	   : 0,
+	'table_index_table' : 0,
+}
+
+class kallsyms_handler(BackgroundTaskThread):
+	def __init__(self, kallsyms, bv):
+		BackgroundTaskThread.__init__(self, "kallsyms_handler initiated", True)
+		self.kallsyms = kallsyms
+		self.bv = bv
+
+	def run(self):
+		kallsyms = self.kallsyms
+		bv = self.bv
+
+		# FIXME: split it up...
+		#for idx in xrange(kallsyms['numsyms']):
+		for idx in xrange(50): # FIXME: this is not working...
+			#if kallsyms['type'][idx] in ["T", "t"]:
+			#	continue
+
+			# NOTE: the logging IS working
+			#reference = "%x %c %s" % (kallsyms['address'][idx], kallsyms['type'][idx], kallsyms['name'][idx])
+			#log(2, reference) # working...
+			#log(2, rebase) # working...
+
+			function_address = kallsyms['address'][idx] - 0xffffffc000080000
+
+			# rebase is correct value during testing...
+			if rebase:
+				function_address = kallsyms['address'][idx]
+
+			# XXX: why isn't this working...
+			bv.define_auto_symbol(Symbol(FunctionSymbol, function_address, kallsyms['name'][idx]))
+			bv.add_function(Architecture['aarch64'].standalone_platform, function_address)
 
 class AndroidKernelView(BinaryView):
 	name = "Android Kernel"
 	long_name = "Android Kernel"
 
-	def __init__(self, data):
-		BinaryView.__init__(self, parent_view = data, file_metadata = data.file)
-		self.raw = data
+	def __init__(self, bv):
+		BinaryView.__init__(self, parent_view = bv, file_metadata = bv.file)
+		self.raw = bv
+
+		# vmlinux is the right size...
+		vmlinux = bv.read(0, len(bv)) # FIXME super inefficient FIXME
+		do_kallsyms(kallsyms, vmlinux) # TODO: work on this..
+
+		# kallsyms_handler doesn't work....
+		#s = kallsyms_handler(kallsyms, bv) # FIXME: doesn't seem to be working...
+		#s.start()
+		#'''
+		#for idx in xrange(kallsyms['numsyms']): # FIXME: need to do this, but it will FREEZE the program
+		for idx in xrange(50): # FIXME: this is bad...
+			function_address = kallsyms['address'][idx] - 0xffffffc000080000
+
+			if rebase:
+				function_address = kallsyms['address'][idx]
+
+			#reference = "0x%x %c %s" % (function_address, kallsyms['type'][idx], kallsyms['name'][idx])
+			#log(2, reference)
+
+			self.define_auto_symbol(Symbol(FunctionSymbol, function_address, kallsyms['name'][idx]))
+			self.add_function(Architecture['aarch64'].standalone_platform, function_address)
+		#'''
 
 	# OK for now...
 	@classmethod
@@ -48,88 +103,14 @@ class AndroidKernelView(BinaryView):
 
 	def init(self):
 		# set 0 as entry_point for now...
-		self.add_entry_point(Architecture['aarch64'].standalone_platform, 0)
 
-		# TODO: add other stuff...
-		# self.add_function(Architecture['aarch64'].standalone_platform, 0)
+		# rebase?? is this right??
+		entry_point = 0
+		if rebase:
+			entry_point = 0xC0008000
 
-		'''
-		try:
-			hdr = self.raw.read(0, 16)
-			self.rom_banks = struct.unpack("B", hdr[4])[0]
-			self.vrom_banks = struct.unpack("B", hdr[5])[0]
-			self.rom_flags = struct.unpack("B", hdr[6])[0]
-			self.mapper_index = struct.unpack("B", hdr[7])[0] | (self.rom_flags >> 4)
-			self.ram_banks = struct.unpack("B", hdr[8])[0]
-			self.rom_offset = 16
-			if self.rom_flags & 4:
-				self.rom_offset += 512
-			self.rom_length = self.rom_banks * 0x4000
+		self.add_entry_point(Architecture['aarch64'].standalone_platform, entry_point)
 
-			nmi = struct.unpack("<H", self.read(0xfffa, 2))[0]
-			start = struct.unpack("<H", self.read(0xfffc, 2))[0]
-			irq = struct.unpack("<H", self.read(0xfffe, 2))[0]
-			self.define_auto_symbol(Symbol(FunctionSymbol, nmi, "_nmi"))
-			self.define_auto_symbol(Symbol(FunctionSymbol, start, "_start"))
-			self.define_auto_symbol(Symbol(FunctionSymbol, irq, "_irq"))
-			self.add_function(Architecture['6502'].standalone_platform, nmi)
-			self.add_function(Architecture['6502'].standalone_platform, irq)
-			self.add_entry_point(Architecture['6502'].standalone_platform, start)
-
-			# Hardware registers
-			self.define_auto_symbol(Symbol(DataSymbol, 0x2000, "PPUCTRL"))
-			self.define_auto_symbol(Symbol(DataSymbol, 0x2001, "PPUMASK"))
-			self.define_auto_symbol(Symbol(DataSymbol, 0x2002, "PPUSTATUS"))
-			self.define_auto_symbol(Symbol(DataSymbol, 0x2003, "OAMADDR"))
-			self.define_auto_symbol(Symbol(DataSymbol, 0x2004, "OAMDATA"))
-			self.define_auto_symbol(Symbol(DataSymbol, 0x2005, "PPUSCROLL"))
-			self.define_auto_symbol(Symbol(DataSymbol, 0x2006, "PPUADDR"))
-			self.define_auto_symbol(Symbol(DataSymbol, 0x2007, "PPUDATA"))
-			self.define_auto_symbol(Symbol(DataSymbol, 0x4000, "SQ1_VOL"))
-			self.define_auto_symbol(Symbol(DataSymbol, 0x4001, "SQ1_SWEEP"))
-			self.define_auto_symbol(Symbol(DataSymbol, 0x4002, "SQ1_LO"))
-			self.define_auto_symbol(Symbol(DataSymbol, 0x4003, "SQ1_HI"))
-			self.define_auto_symbol(Symbol(DataSymbol, 0x4004, "SQ2_VOL"))
-			self.define_auto_symbol(Symbol(DataSymbol, 0x4005, "SQ2_SWEEP"))
-			self.define_auto_symbol(Symbol(DataSymbol, 0x4006, "SQ2_LO"))
-			self.define_auto_symbol(Symbol(DataSymbol, 0x4007, "SQ2_HI"))
-			self.define_auto_symbol(Symbol(DataSymbol, 0x4008, "TRI_LINEAR"))
-			self.define_auto_symbol(Symbol(DataSymbol, 0x400a, "TRI_LO"))
-			self.define_auto_symbol(Symbol(DataSymbol, 0x400b, "TRI_HI"))
-			self.define_auto_symbol(Symbol(DataSymbol, 0x400c, "NOISE_VOL"))
-			self.define_auto_symbol(Symbol(DataSymbol, 0x400e, "NOISE_LO"))
-			self.define_auto_symbol(Symbol(DataSymbol, 0x400f, "NOISE_HI"))
-			self.define_auto_symbol(Symbol(DataSymbol, 0x4010, "DMC_FREQ"))
-			self.define_auto_symbol(Symbol(DataSymbol, 0x4011, "DMC_RAW"))
-			self.define_auto_symbol(Symbol(DataSymbol, 0x4012, "DMC_START"))
-			self.define_auto_symbol(Symbol(DataSymbol, 0x4013, "DMC_LEN"))
-			self.define_auto_symbol(Symbol(DataSymbol, 0x4014, "OAMDMA"))
-			self.define_auto_symbol(Symbol(DataSymbol, 0x4015, "SND_CHN"))
-			self.define_auto_symbol(Symbol(DataSymbol, 0x4016, "JOY1"))
-			self.define_auto_symbol(Symbol(DataSymbol, 0x4017, "JOY2"))
-
-			sym_files = [self.raw.file.filename + ".%x.nl" % self.__class__.bank,
-					self.raw.file.filename + ".ram.nl",
-					self.raw.file.filename + ".%x.nl" % (self.rom_banks - 1)]
-			for f in sym_files:
-				if os.path.exists(f):
-					sym_contents = open(f, "r").read()
-					lines = sym_contents.split('\n')
-					for line in lines:
-						sym = line.split('#')
-						if len(sym) < 3:
-							break
-						addr = int(sym[0][1:], 16)
-						name = sym[1]
-						self.define_auto_symbol(Symbol(FunctionSymbol, addr, name))
-						if addr >= 0x8000:
-							self.add_function(Architecture['6502'].standalone_platform, addr)
-
-			return True
-		except:
-			log_error(traceback.format_exc())
-			return False
-		'''
 		return True
 
 	#def perform_is_valid_offset(self, addr):
@@ -139,24 +120,19 @@ class AndroidKernelView(BinaryView):
 
 	# very important
 	def perform_read(self, addr, length):
+
 		# XXX: does rebase effect this??
+		if rebase:
+			# rebase - is this right??
+			addr -= 0xC0008000
+
+		if addr < 0:
+			return False
+
 		return self.raw.read(addr, length)
-
-	#def perform_write(self, addr, value):
-	#	return False
-
-	#def perform_get_start(self):
-	#	return 0
-
-	#def perform_get_length(self):
-	#	return 0x10000
 
 	def perform_is_executable(self):
 		return True
-
-	#def perform_get_entry_point(self):
-		# XXX: does rebase effect this??
-	#	return 0
 
 class AndroidKernelViewBank(AndroidKernelView):
 	name = "Android kernel"
@@ -169,10 +145,10 @@ AndroidKernelViewBank.register()
 
 # OK AFAIK
 def INT(offset, vmlinux):
-	bytes = kallsyms['arch'] / 8
-	s = vmlinux[offset:offset+bytes]
+	size = kallsyms['arch'] / 8
+	s = vmlinux[offset:offset+size]
 	f = 'I' if bytes==4 else 'Q'
-	(num,) = struct.unpack(f, s)
+	(num,) = struct.unpack(f, s) # Error: requires string of length 8
 	return num
 
 # OK AFAIK
@@ -202,7 +178,7 @@ def STRIPZERO(offset, vmlinux, step=4):
 
 #//////////////////////
 # OK AFAIK
-def do_token_index_table(kallsyms , offset, vmlinux):
+def do_token_index_table(kallsyms, offset, vmlinux):
 	kallsyms['token_index_table'] = offset
 	print '[+] kallsyms_token_index_table = ', hex(offset)
 
@@ -228,7 +204,6 @@ def do_marker_table(kallsyms, offset, vmlinux):
 	offset = STRIPZERO(offset, vmlinux)
 
 	do_token_table(kallsyms, offset, vmlinux)
-
 
 def do_type_table(kallsyms, offset, vmlinux):
 	flag = True
@@ -339,7 +314,6 @@ def do_guess_start_address(kallsyms, vmlinux):
 	if kallsyms['arch']==64 and _startaddr_from_banner!=_startaddr_from_xstext:
 		 kallsyms['_start'] = 0xffffffc000000000 + INT(8, vmlinux)
 
-
 	kallsyms_guess_start_addresses = [hex(0xffffffc000000000 + INT(8, vmlinux)), hex(_startaddr_from_xstext), hex(_startaddr_from_banner), hex(_startaddr_from_processor)]
 
 	if len(set(kallsyms_guess_start_addresses)) == 1:
@@ -351,15 +325,24 @@ def do_guess_start_address(kallsyms, vmlinux):
 
 # XXX: is this looking for address table??
 def do_address_table(kallsyms, offset, vmlinux):
+	"""
+	vmlinux is self.raw
+
+	returns number of symbols, but if it's less than 40k we don't care so lets return False instead
+
+	"""
+
 	step = kallsyms['arch'] / 8
-	if kallsyms['arch'] == 32:
-		addr_base = 0xC0000000
-	else:
-		addr_base = 0xffffffc000000000
+
+	addr_base = 0xffffffc000000000
+
+	# currently only suport aarch64
+	#if kallsyms['arch'] == 32:
+	#	addr_base = 0xC0000000
 
 	kallsyms['address'] = []
 	for i in xrange(offset, len(vmlinux), step):
-		addr = INT(i, vmlinux)
+		addr = INT(i, vmlinux) # FIXME: failed here
 		if addr < addr_base:
 			return (i-offset)/step
 		else:
@@ -367,14 +350,52 @@ def do_address_table(kallsyms, offset, vmlinux):
 
 	return 0
 
+'''
+# TODO: let's limit the searches for speed purposes...
+def find_address_table(kallsyms, vmlinux, step):
+	"""
+	brute force run "find_address_table". Run in do_kallsyms.
+
+	vmlinux is self.raw
+	"""
+
+	# TODO: maybe do something useful with the "address_table" so this function makes sense...
+	offset = 0
+	numsyms = 0
+	vmlen = len(vmlinux) # XXX
+
+	# slide index through entire file
+	while offset+step < vmlen:
+		# check if address_table exists at offset - very inefficient
+		num = do_address_table(kallsyms, offset, vmlinux)
+		if num > 40000:
+			#kallsyms['numsyms'] = num # does this persist?? saved to parent??
+			numsyms = num
+			break
+		else:
+			offset += (num+1)*step
+
+	return offset, numsyms
+'''
+
+# TAKES ~3 seconds to run entire program via cmdline
 def do_kallsyms(kallsyms, vmlinux):
+	"""
+		first function executed
+
+		[address_table][??]
+
+		vmlinux is self.raw....
+
+	"""
+	kallsyms['arch'] = 64 # assert(kallsyms['arch'] == 64)
+
 	step = kallsyms['arch'] / 8
 
 	offset = 0
-	vmlen  = len(vmlinux) # OK
-
+	vmlen = len(vmlinux)
 	while offset+step < vmlen:
-		num = do_address_table(kallsyms, offset, vmlinux) # XXX: working?
+		num = do_address_table(kallsyms, offset, vmlinux)
 		if num > 40000:
 			kallsyms['numsyms'] = num
 			break
@@ -382,11 +403,11 @@ def do_kallsyms(kallsyms, vmlinux):
 			offset += (num+1)*step
 
 	if kallsyms['numsyms'] == 0:
-		log(3, '[!]lookup_address_table error...')
+		print '[!]lookup_address_table error...'
 		return
 
 	kallsyms['address_table'] = offset
-	print '[+] kallsyms_address_table = ', hex(offset)
+	print '[+]kallsyms_address_table = ', hex(offset)
 
 	offset += kallsyms['numsyms']*step
 	offset = STRIPZERO(offset, vmlinux, step)
@@ -407,7 +428,7 @@ def do_kallsyms(kallsyms, vmlinux):
 	offset = STRIPZERO(offset, vmlinux)
 	do_name_table(kallsyms, offset, vmlinux)
 	do_guess_start_address(kallsyms, vmlinux)
-	return
+
 
 def do_get_arch(kallsyms, bv):
 	def fuzzy_arm64(bv):
@@ -430,7 +451,6 @@ def do_get_arch(kallsyms, bv):
 		kallsyms['arch'] = 64
 
 	'''
-
 	elif fuzzy_arm64(bv):
 		kallsyms['arch'] = 64
 
@@ -441,15 +461,9 @@ def do_get_arch(kallsyms, bv):
 
 	print '[+] kallsyms_arch = ', kallsyms['arch']
 
-#/////////////
-
-
-def print_kallsyms(kallsyms, vmlinux):
-	buf = '\n'.join( '%x %c %s'%(kallsyms['address'][i],kallsyms['type'][i],kallsyms['name'][i]) for i in xrange(kallsyms['numsyms']) )
-	open('kallsyms','w').write(buf)
-
 #////////////////////////////////////////////////////////////////////////////////////////////
 
+'''
 def accept_file(li, n):
 	"""
 	Check if the file is of supported format
@@ -473,7 +487,9 @@ def accept_file(li, n):
 	#	 return 0
 
 	return "Android OS Kernel(ARM)"
+'''
 
+'''
 def load_file(li, neflags, format):
 	"""
 	Load the file into database
@@ -513,26 +529,4 @@ def load_file(li, neflags, format):
 
 	print "Android vmlinux loaded..."
 	return 1
-
-#////////////////////////////////////////////////////////////////////////////////////////////
-
-def help():
-	print 'Usage:  droidimg.py [vmlinux FILE]\n'
-	exit()
-
-def droidimg(bv, offset):
-	vmlinux = bv.file.raw.read(0, len(bv))
-
-	do_get_arch(kallsyms, bv) # TODO: port to "bv" for the sake of "is_valid_for_data"
-	# do_kallsyms(kallsyms, vmlinux) # vmlinux => bv # TODO: work on this..
-
-	# TODO: reenable this...
 	'''
-	if kallsyms['numsyms'] > 0:
-		print_kallsyms(kallsyms, bv) # vmlinux => bv
-
-	else:
-		print '[!]get kallsyms error...'
-	'''
-
-	# if it fails i'ts not a valid vmlinux...
