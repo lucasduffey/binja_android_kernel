@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 # original author: nforest@k33nteam.org
 
@@ -9,8 +8,6 @@ import time
 import struct
 
 from binaryninja import *
-
-#////////////////////////////////////////////////////////////////////////////////////////////
 
 rebase = False
 
@@ -41,8 +38,9 @@ class kallsyms_handler(BackgroundTaskThread):
 		# FIXME: split it up...
 		#for idx in xrange(kallsyms['numsyms']):
 		for idx in xrange(50): # FIXME: this is not working...
-			#if kallsyms['type'][idx] in ["T", "t"]:
-			#	continue
+			# keep this
+			if kallsyms['type'][idx] not in ["T", "t"]:
+				continue
 
 			# NOTE: the logging IS working
 			#reference = "%x %c %s" % (kallsyms['address'][idx], kallsyms['type'][idx], kallsyms['name'][idx])
@@ -74,9 +72,14 @@ class AndroidKernelView(BinaryView):
 		# kallsyms_handler doesn't work....
 		#s = kallsyms_handler(kallsyms, bv) # FIXME: doesn't seem to be working...
 		#s.start()
+
 		#'''
 		#for idx in xrange(kallsyms['numsyms']): # FIXME: need to do this, but it will FREEZE the program
 		for idx in xrange(50): # FIXME: this is bad...
+			# keep this
+			if kallsyms['type'][idx] not in ["T", "t"]:
+				continue
+
 			function_address = kallsyms['address'][idx] - 0xffffffc000080000
 
 			if rebase:
@@ -107,7 +110,7 @@ class AndroidKernelView(BinaryView):
 		# rebase?? is this right??
 		entry_point = 0
 		if rebase:
-			entry_point = 0xC0008000
+			entry_point = 0xffffffc000080000
 
 		self.add_entry_point(Architecture['aarch64'].standalone_platform, entry_point)
 
@@ -124,7 +127,7 @@ class AndroidKernelView(BinaryView):
 		# XXX: does rebase effect this??
 		if rebase:
 			# rebase - is this right??
-			addr -= 0xC0008000
+			addr -= 0xffffffc000080000
 
 		if addr < 0:
 			return False
@@ -143,33 +146,28 @@ class AndroidKernelViewBank(AndroidKernelView):
 
 AndroidKernelViewBank.register()
 
-# OK AFAIK
 def INT(offset, vmlinux):
 	size = kallsyms['arch'] / 8
 	s = vmlinux[offset:offset+size]
 	f = 'I' if bytes==4 else 'Q'
-	(num,) = struct.unpack(f, s) # Error: requires string of length 8
+	(num,) = struct.unpack(f, s)
 	return num
 
-# OK AFAIK
 def INT32(offset, vmlinux):
 	s = vmlinux[offset:offset+4]
 	(num,) = struct.unpack('I', s)
 	return num
 
-# OK AFAIK
 def INT64(offset, vmlinux):
 	s = vmlinux[offset:offset+8]
 	(num,) = struct.unpack('Q', s)
 	return num
 
-# OK AFAIK
 def SHORT(offset, vmlinux):
 	s = vmlinux[offset:offset+2]
 	(num,) = struct.unpack('H', s)
 	return num
 
-# XXX??
 def STRIPZERO(offset, vmlinux, step=4):
 	NOTZERO = INT32 if step==4 else INT
 	for i in xrange(offset,len(vmlinux),step):
@@ -177,7 +175,6 @@ def STRIPZERO(offset, vmlinux, step=4):
 			return i
 
 #//////////////////////
-# OK AFAIK
 def do_token_index_table(kallsyms, offset, vmlinux):
 	kallsyms['token_index_table'] = offset
 	print '[+] kallsyms_token_index_table = ', hex(offset)
@@ -350,34 +347,6 @@ def do_address_table(kallsyms, offset, vmlinux):
 
 	return 0
 
-'''
-# TODO: let's limit the searches for speed purposes...
-def find_address_table(kallsyms, vmlinux, step):
-	"""
-	brute force run "find_address_table". Run in do_kallsyms.
-
-	vmlinux is self.raw
-	"""
-
-	# TODO: maybe do something useful with the "address_table" so this function makes sense...
-	offset = 0
-	numsyms = 0
-	vmlen = len(vmlinux) # XXX
-
-	# slide index through entire file
-	while offset+step < vmlen:
-		# check if address_table exists at offset - very inefficient
-		num = do_address_table(kallsyms, offset, vmlinux)
-		if num > 40000:
-			#kallsyms['numsyms'] = num # does this persist?? saved to parent??
-			numsyms = num
-			break
-		else:
-			offset += (num+1)*step
-
-	return offset, numsyms
-'''
-
 # TAKES ~3 seconds to run entire program via cmdline
 def do_kallsyms(kallsyms, vmlinux):
 	"""
@@ -457,76 +426,6 @@ def do_get_arch(kallsyms, bv):
 	else:
 		kallsyms['arch'] = 32
 	'''
-	return False # this is messy, but can integrate into binaryninja
+	return False #  messy, but for binaryninja integration
 
 	print '[+] kallsyms_arch = ', kallsyms['arch']
-
-#////////////////////////////////////////////////////////////////////////////////////////////
-
-'''
-def accept_file(li, n):
-	"""
-	Check if the file is of supported format
-
-	@param li: a file-like object which can be used to access the input data
-	@param n : format number. The function will be called with incrementing
-			   number until it returns zero
-	@return: 0 - no more supported formats
-			 string "name" - format name to display in the chooser dialog
-			 dictionary { 'format': "name", 'options': integer }
-			   options: should be 1, possibly ORed with ACCEPT_FIRST (0x8000)
-			   to indicate preferred format
-	"""
-
-	# we support only one format per file
-	if n > 0:
-		return 0
-
-	# magic = li.read(8)
-	# if magic != 'ANDROID!':
-	#	 return 0
-
-	return "Android OS Kernel(ARM)"
-'''
-
-'''
-def load_file(li, neflags, format):
-	"""
-	Load the file into database
-
-	@param li: a file-like object which can be used to access the input data
-	@param neflags: options selected by the user, see loader.hpp
-	@return: 0-failure, 1-ok
-	"""
-
-	li.seek(0)
-	vmlinux = li.read(li.size())
-
-	do_get_arch(kallsyms, vmlinux)
-	do_kallsyms(kallsyms, vmlinux)
-	# print_kallsyms(kallsyms, vmlinux)
-
-	if kallsyms['numsyms'] == 0:
-		print '[!]get kallsyms error...'
-		return 0
-
-	print '[+] kallsyms_start_address = ', hex(kallsyms['_start'])
-
-	idaapi.set_processor_type("arm", SETPROC_ALL|SETPROC_FATAL)
-	li.file2base(0, kallsyms['_start'], kallsyms['_start']+li.size(), True)
-
-	s = idaapi.segment_t()
-	s.bitness = kallsyms['arch'] / 32
-	s.startEA = kallsyms['_start']
-	s.endEA = kallsyms['_start']+li.size()
-	idaapi.add_segm_ex(s,".text","CODE",ADDSEG_OR_DIE)
-
-	for i in xrange(kallsyms['numsyms']):
-		if kallsyms['type'][i] in ['t','T']:
-			idaapi.add_entry(kallsyms['address'][i], kallsyms['address'][i], kallsyms['name'][i], 1)
-		else:
-			idaapi.add_entry(kallsyms['address'][i], kallsyms['address'][i], kallsyms['name'][i], 0)
-
-	print "Android vmlinux loaded..."
-	return 1
-	'''
