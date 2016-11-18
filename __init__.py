@@ -166,10 +166,10 @@ def SHORT(offset, vmlinux):
 	(num,) = struct.unpack('H', s)
 	return num
 
-def STRIPZERO(offset, vmlinux, step=4):
+def STRIPZERO(bv, offset, step=4):
 	NOTZERO = INT32 if step==4 else INT
-	for i in xrange(offset,len(vmlinux),step):
-		if NOTZERO(i, vmlinux):
+	for i in xrange(offset,len(bv),step):
+		if NOTZERO(i, bv):
 			return i
 
 #//////////////////////
@@ -198,7 +198,7 @@ def do_marker_table(bv, kallsyms, offset, vmlinux):
 	print '[+] kallsyms_marker_table = ', hex(offset)
 
 	offset += (((kallsyms['numsyms']-1)>>8)+1)*(kallsyms['arch']/8)
-	offset = STRIPZERO(offset, vmlinux)
+	offset = STRIPZERO(bv, offset)
 
 	do_token_table(bv, kallsyms, offset, vmlinux)
 
@@ -215,7 +215,7 @@ def do_type_table(bv, kallsyms, offset, vmlinux):
 
 		while INT(offset, vmlinux):
 			offset += (kallsyms['arch']/8)
-		offset = STRIPZERO(offset, vmlinux)
+		offset = STRIPZERO(bv, offset)
 	else:
 		kallsyms['type_table'] = 0
 
@@ -234,7 +234,7 @@ def do_name_table(bv, kallsyms, offset, vmlinux):
 		offset += length+1
 	while offset%4 != 0:
 		offset += 1
-	offset = STRIPZERO(offset, vmlinux)
+	offset = STRIPZERO(bv, offset)
 
 	do_type_table(bv, kallsyms, offset, vmlinux)
 
@@ -382,7 +382,7 @@ def do_kallsyms(bv, kallsyms):
 	print '[+]kallsyms_address_table = ', hex(offset)
 
 	offset += kallsyms['numsyms']*step
-	offset = STRIPZERO(offset, vmlinux, step) # TODO: use bv
+	offset = STRIPZERO(bv, offset, step) # TODO: use bv
 	num = INT(offset, vmlinux) # TODO: use bv
 	offset += step
 
@@ -397,6 +397,6 @@ def do_kallsyms(bv, kallsyms):
 			kallsyms['address'].insert(0,0)
 		kallsyms['numsyms'] = num
 
-	offset = STRIPZERO(offset, vmlinux)
+	offset = STRIPZERO(bv, offset)
 	do_name_table(bv, kallsyms, offset, vmlinux)
 	do_guess_start_address(bv, kallsyms, vmlinux)
