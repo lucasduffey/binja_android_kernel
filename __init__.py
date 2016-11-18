@@ -173,12 +173,12 @@ def STRIPZERO(offset, vmlinux, step=4):
 			return i
 
 #//////////////////////
-def do_token_index_table(kallsyms, offset):
+def do_token_index_table(bv, kallsyms, offset):
 	kallsyms['token_index_table'] = offset
 	print '[+] kallsyms_token_index_table = ', hex(offset)
 
 # TODO: vmlinux => bv
-def do_token_table(kallsyms, offset, vmlinux):
+def do_token_table(bv, kallsyms, offset, vmlinux):
 	kallsyms['token_table'] = offset
 	print '[+] kallsyms_token_table = ', hex(offset)
 
@@ -190,20 +190,20 @@ def do_token_table(kallsyms, offset, vmlinux):
 			break
 	offset = i-2
 
-	do_token_index_table(kallsyms, offset)
+	do_token_index_table(bv, kallsyms, offset)
 
 # TODO: vmlinux => bv
-def do_marker_table(kallsyms, offset, vmlinux):
+def do_marker_table(bv, kallsyms, offset, vmlinux):
 	kallsyms['marker_table'] = offset
 	print '[+] kallsyms_marker_table = ', hex(offset)
 
 	offset += (((kallsyms['numsyms']-1)>>8)+1)*(kallsyms['arch']/8)
 	offset = STRIPZERO(offset, vmlinux)
 
-	do_token_table(kallsyms, offset, vmlinux)
+	do_token_table(bv, kallsyms, offset, vmlinux)
 
 # TODO: vmlinux => bv
-def do_type_table(kallsyms, offset, vmlinux):
+def do_type_table(bv, kallsyms, offset, vmlinux):
 	flag = True
 	for i in xrange(offset,offset+256*4,4):
 		if INT(i, vmlinux) & ~0x20202020 != 0x54545454:
@@ -222,7 +222,7 @@ def do_type_table(kallsyms, offset, vmlinux):
 	print '[+] kallsyms_type_table = ', hex(kallsyms['type_table'])
 
 	offset -= 4
-	do_marker_table(kallsyms, offset, vmlinux)
+	do_marker_table(bv, kallsyms, offset, vmlinux)
 
 # TODO: vmlinux => bv
 def do_name_table(bv, kallsyms, offset, vmlinux):
@@ -230,13 +230,13 @@ def do_name_table(bv, kallsyms, offset, vmlinux):
 	print '[+] kallsyms_name_table = ', hex(offset)
 
 	for i in xrange(kallsyms['numsyms']):
-		length = ord(vmlinux[offset])
+		length = ord(bv[offset]) # was vmlinux
 		offset += length+1
 	while offset%4 != 0:
 		offset += 1
 	offset = STRIPZERO(offset, vmlinux)
 
-	do_type_table(kallsyms, offset, vmlinux)
+	do_type_table(bv, kallsyms, offset, vmlinux)
 
 	# decompress name and type
 	name_offset = 0
