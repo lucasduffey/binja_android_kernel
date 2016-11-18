@@ -65,9 +65,7 @@ class AndroidKernelView(BinaryView):
 		BinaryView.__init__(self, parent_view = bv, file_metadata = bv.file)
 		self.raw = bv
 
-		# vmlinux is the right size...
-		vmlinux = bv.read(0, len(bv)) # FIXME super inefficient FIXME
-		do_kallsyms(kallsyms, vmlinux) # TODO: work on this..
+		do_kallsyms(bv, kallsyms) # TODO: work on this..
 
 		# kallsyms_handler doesn't work....
 		#s = kallsyms_handler(kallsyms, bv) # FIXME: doesn't seem to be working...
@@ -175,15 +173,16 @@ def STRIPZERO(offset, vmlinux, step=4):
 			return i
 
 #//////////////////////
-def do_token_index_table(kallsyms, offset, vmlinux):
+def do_token_index_table(kallsyms, offset):
 	kallsyms['token_index_table'] = offset
 	print '[+] kallsyms_token_index_table = ', hex(offset)
 
+# TODO: vmlinux => bv
 def do_token_table(kallsyms, offset, vmlinux):
 	kallsyms['token_table'] = offset
 	print '[+] kallsyms_token_table = ', hex(offset)
 
-	for i in xrange(offset,len(vmlinux)):
+	for i in xrange(offset, len(vmlinux)):
 		if SHORT(i,vmlinux) == 0:
 			break
 	for i in xrange(i, len(vmlinux)):
@@ -191,8 +190,9 @@ def do_token_table(kallsyms, offset, vmlinux):
 			break
 	offset = i-2
 
-	do_token_index_table(kallsyms , offset, vmlinux)
+	do_token_index_table(kallsyms, offset)
 
+# TODO: vmlinux => bv
 def do_marker_table(kallsyms, offset, vmlinux):
 	kallsyms['marker_table'] = offset
 	print '[+] kallsyms_marker_table = ', hex(offset)
@@ -202,6 +202,7 @@ def do_marker_table(kallsyms, offset, vmlinux):
 
 	do_token_table(kallsyms, offset, vmlinux)
 
+# TODO: vmlinux => bv
 def do_type_table(kallsyms, offset, vmlinux):
 	flag = True
 	for i in xrange(offset,offset+256*4,4):
@@ -223,7 +224,8 @@ def do_type_table(kallsyms, offset, vmlinux):
 	offset -= 4
 	do_marker_table(kallsyms, offset, vmlinux)
 
-def do_name_table(kallsyms, offset, vmlinux):
+# TODO: vmlinux => bv
+def do_name_table(bv, kallsyms, offset, vmlinux):
 	kallsyms['name_table'] = offset
 	print '[+] kallsyms_name_table = ', hex(offset)
 
@@ -266,7 +268,7 @@ def do_name_table(kallsyms, offset, vmlinux):
 			kallsyms['type'].append(name[0])
 			kallsyms['name'].append(name[1:])
 
-def do_guess_start_address(kallsyms, vmlinux):
+def do_guess_start_address(bv, kallsyms, vmlinux):
 	_startaddr_from_xstext = 0
 	_startaddr_from_banner = 0
 	_startaddr_from_processor = 0
@@ -279,7 +281,7 @@ def do_guess_start_address(kallsyms, vmlinux):
 
 		elif kallsyms['name'][i] == 'linux_banner':
 			linux_banner_addr = kallsyms['address'][i]
-			linux_banner_fileoffset = vmlinux.find('Linux version ')
+			linux_banner_fileoffset = vmlinux.find('Linux version ') # FIXME: use "bv" instead
 			if linux_banner_fileoffset:
 				_startaddr_from_banner = linux_banner_addr - linux_banner_fileoffset
 
@@ -321,7 +323,7 @@ def do_guess_start_address(kallsyms, vmlinux):
 	return kallsyms['_start']
 
 # XXX: is this looking for address table??
-def do_address_table(kallsyms, offset, vmlinux):
+def do_address_table(bv, kallsyms, offset, vmlinux):
 	"""
 	vmlinux is self.raw
 
@@ -348,7 +350,7 @@ def do_address_table(kallsyms, offset, vmlinux):
 	return 0
 
 # TAKES ~3 seconds to run entire program via cmdline
-def do_kallsyms(kallsyms, vmlinux):
+def do_kallsyms(bv, kallsyms):
 	"""
 		first function executed
 
@@ -357,14 +359,15 @@ def do_kallsyms(kallsyms, vmlinux):
 		vmlinux is self.raw....
 
 	"""
-	kallsyms['arch'] = 64 # assert(kallsyms['arch'] == 64)
+	vmlinux = bv.read(0, len(bv)) # FIXME super inefficient FIXME
 
+	kallsyms['arch'] = 64 # assert(kallsyms['arch'] == 64)
 	step = kallsyms['arch'] / 8
 
 	offset = 0
-	vmlen = len(vmlinux)
+	vmlen = len(bv) # was len(vmlinux)
 	while offset+step < vmlen:
-		num = do_address_table(kallsyms, offset, vmlinux)
+		num = do_address_table(bv, kallsyms, offset, vmlinux) # FIXME: remove vmlinux arg
 		if num > 40000:
 			kallsyms['numsyms'] = num
 			break
@@ -379,8 +382,8 @@ def do_kallsyms(kallsyms, vmlinux):
 	print '[+]kallsyms_address_table = ', hex(offset)
 
 	offset += kallsyms['numsyms']*step
-	offset = STRIPZERO(offset, vmlinux, step)
-	num = INT(offset, vmlinux)
+	offset = STRIPZERO(offset, vmlinux, step) # TODO: use bv
+	num = INT(offset, vmlinux) # TODO: use bv
 	offset += step
 
 	print '[+] kallsyms_num = ', kallsyms['numsyms'], num
@@ -395,37 +398,5 @@ def do_kallsyms(kallsyms, vmlinux):
 		kallsyms['numsyms'] = num
 
 	offset = STRIPZERO(offset, vmlinux)
-	do_name_table(kallsyms, offset, vmlinux)
-	do_guess_start_address(kallsyms, vmlinux)
-
-
-def do_get_arch(kallsyms, bv):
-	def fuzzy_arm64(bv):
-		step = 8
-		offset = 0
-		vmlen  = len(bv) - len(bv)%8
-		addr_base = 0xffffffc000000000
-		while offset+step < vmlen:
-		  for i in xrange(offset, vmlen, step):
-				if INT64(i, bv) < addr_base:
-					addrnum = (i-offset)/step
-					if addrnum > 10000:
-						return True
-					else:
-						offset = i+step
-		return False
-
-	# only mode we will support
-	if re.search('ARMd', bv[:0x200]):
-		kallsyms['arch'] = 64
-
-	'''
-	elif fuzzy_arm64(bv):
-		kallsyms['arch'] = 64
-
-	else:
-		kallsyms['arch'] = 32
-	'''
-	return False #  messy, but for binaryninja integration
-
-	print '[+] kallsyms_arch = ', kallsyms['arch']
+	do_name_table(bv, kallsyms, offset, vmlinux)
+	do_guess_start_address(bv, kallsyms, vmlinux)
