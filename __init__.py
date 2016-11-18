@@ -182,10 +182,10 @@ def do_token_table(bv, kallsyms, offset, vmlinux):
 	kallsyms['token_table'] = offset
 	print '[+] kallsyms_token_table = ', hex(offset)
 
-	for i in xrange(offset, len(vmlinux)):
+	for i in xrange(offset, len(bv)):
 		if SHORT(i,vmlinux) == 0:
 			break
-	for i in xrange(i, len(vmlinux)):
+	for i in xrange(i, len(bv)):
 		if ord(vmlinux[i]):
 			break
 	offset = i-2
@@ -340,7 +340,7 @@ def do_address_table(bv, kallsyms, offset, vmlinux):
 	#	addr_base = 0xC0000000
 
 	kallsyms['address'] = []
-	for i in xrange(offset, len(vmlinux), step):
+	for i in xrange(offset, len(bv), step):
 		addr = INT(i, vmlinux) # FIXME: failed here
 		if addr < addr_base:
 			return (i-offset)/step
@@ -365,7 +365,7 @@ def do_kallsyms(bv, kallsyms):
 	step = kallsyms['arch'] / 8
 
 	offset = 0
-	vmlen = len(bv) # was len(vmlinux)
+	vmlen = len(bv)
 	while offset+step < vmlen:
 		num = do_address_table(bv, kallsyms, offset, vmlinux) # FIXME: remove vmlinux arg
 		if num > 40000:
