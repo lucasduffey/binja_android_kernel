@@ -230,7 +230,7 @@ def do_name_table(bv, kallsyms, offset, vmlinux):
 	print '[+] kallsyms_name_table = ', hex(offset)
 
 	for i in xrange(kallsyms['numsyms']):
-		length = ord(bv[offset]) # was vmlinux
+		length = ord(vmlinux[offset]) # how is bv.file.raw is not working??
 		offset += length+1
 	while offset%4 != 0:
 		offset += 1
@@ -341,7 +341,7 @@ def do_address_table(bv, kallsyms, offset, vmlinux):
 
 	kallsyms['address'] = []
 	for i in xrange(offset, len(bv), step):
-		addr = INT(i, vmlinux) # FIXME: failed here
+		addr = INT(i, bv) # was vmlinux
 		if addr < addr_base:
 			return (i-offset)/step
 		else:
@@ -360,6 +360,12 @@ def do_kallsyms(bv, kallsyms):
 
 	"""
 	vmlinux = bv.read(0, len(bv)) # FIXME super inefficient FIXME
+
+	# [FAIL] assert vmlinux == bv.file.raw
+	# [FAIL] assert vmlinux == bv
+
+	# log(3, type(vmlinux)) # string
+	# log(3, type(bv.file.raw)) # binaryninja.BinaryView
 
 	kallsyms['arch'] = 64 # assert(kallsyms['arch'] == 64)
 	step = kallsyms['arch'] / 8
