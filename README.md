@@ -1,1 +1,2 @@
-# binja_android_kernel
+# Usage
+* expects decompressed zImage
