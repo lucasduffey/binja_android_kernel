@@ -25,35 +25,6 @@ kallsyms = {
 	'table_index_table' : 0,
 }
 
-class kallsyms_handler(BackgroundTaskThread):
-	def __init__(self, kallsyms, bv):
-		BackgroundTaskThread.__init__(self, "kallsyms_handler initiated", True)
-		self.kallsyms = kallsyms
-		self.bv = bv
-
-	def run(self):
-		# FIXME: split it up...
-		#for idx in xrange(kallsyms['numsyms']):
-		for idx in xrange(50): # FIXME: this is not working...
-			# keep this
-			if self.kallsyms['type'][idx] not in ["T", "t"]:
-				continue
-
-			# NOTE: the logging IS working
-			#reference = "%x %c %s" % (self.kallsyms['address'][idx], self.kallsyms['type'][idx], self.kallsyms['name'][idx])
-			#log(2, reference) # working...
-			#log(2, rebase) # working...
-
-			function_address = self.kallsyms['address'][idx] - 0xffffffc000080000
-
-			# rebase is correct value during testing...
-			if rebase:
-				function_address = self.kallsyms['address'][idx]
-
-			# XXX: why isn't this working...
-			self.bv.define_auto_symbol(Symbol(FunctionSymbol, function_address, self.kallsyms['name'][idx]))
-			self.bv.add_function(Architecture['aarch64'].standalone_platform, function_address)
-
 class AndroidKernelView(BinaryView):
 	name = "Android Kernel"
 	long_name = "Android Kernel"
@@ -61,16 +32,16 @@ class AndroidKernelView(BinaryView):
 	def __init__(self, bv):
 		BinaryView.__init__(self, parent_view = bv, file_metadata = bv.file)
 		self.raw = bv
-		self.vmlinux = bv.read(0, len(bv.file.raw)) # FIXME super inefficient FIXME
+		#self.vmlinux = bv.read(0, len(bv.file.raw)) # FIXME super inefficient FIXME
 		self.kallsyms = kallsyms
 
-		self.do_kallsyms() # TODO: work on this..
+		#self.do_kallsyms() # TODO: work on this..
 
 		# kallsyms_handler doesn't work....
-		#s = kallsyms_handler(kallsyms, bv) # FIXME: doesn't seem to be working...
-		#s.start()
+		s = kallsyms_handler(self, kallsyms) # FIXME: doesn't seem to be working...
+		s.start()
 
-		#'''
+		'''
 		#for idx in xrange(kallsyms['numsyms']): # FIXME: need to do this, but it will FREEZE the program
 		for idx in xrange(50): # FIXME: this is bad...
 			# keep this
@@ -87,7 +58,7 @@ class AndroidKernelView(BinaryView):
 
 			self.define_auto_symbol(Symbol(FunctionSymbol, function_address, kallsyms['name'][idx]))
 			self.add_function(Architecture['aarch64'].standalone_platform, function_address)
-		#'''
+		'''
 
 	# TAKES ~3 seconds to run entire program via cmdline
 	def do_kallsyms(self):
@@ -374,6 +345,43 @@ class AndroidKernelView(BinaryView):
 
 	def perform_is_executable(self):
 		return True
+
+
+class kallsyms_handler(BackgroundTaskThread, AndroidKernelView):
+	# I believe __init__ isn't threaded, so keep heavy lifting out if it.
+	def __init__(self, bv, kallsyms):
+		BackgroundTaskThread.__init__(self, "kallsyms_handler initiated", True)
+		self.kallsyms = kallsyms
+		self.bv = bv
+
+	def run(self):
+		self.vmlinux = self.bv.read(0, len(self.bv.file.raw)) # FIXME super inefficient FIXME
+
+		# TODO: thread do_kallsyms better?
+		self.do_kallsyms() # TODO: work on this..
+
+		# FIXME: split it up...
+		for idx in xrange(kallsyms['numsyms']):
+		#for idx in xrange(50): # FIXME: this is not working...
+			# keep this
+			if self.kallsyms['type'][idx] not in ["T", "t"]:
+				continue
+
+			# NOTE: the logging IS working
+			#reference = "%x %c %s" % (self.kallsyms['address'][idx], self.kallsyms['type'][idx], self.kallsyms['name'][idx])
+			#log(2, reference) # working...
+			#log(2, rebase) # working...
+
+			function_address = self.kallsyms['address'][idx] - 0xffffffc000080000
+
+			# rebase is correct value during testing...
+			if rebase:
+				function_address = self.kallsyms['address'][idx]
+
+			# XXX: why isn't this working...
+			self.bv.define_auto_symbol(Symbol(FunctionSymbol, function_address, self.kallsyms['name'][idx]))
+			self.bv.add_function(Architecture['aarch64'].standalone_platform, function_address)
+
 
 class AndroidKernelViewBank(AndroidKernelView):
 	name = "Android kernel"
