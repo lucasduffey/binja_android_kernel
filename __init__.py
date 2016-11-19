@@ -347,6 +347,12 @@ class kallsyms_handler(BackgroundTaskThread, AndroidKernelView):
 			if rebase:
 				function_address = self.kallsyms['address'][idx]
 
+			# prevent re-adding functions - but this seems like too much overhead
+			# SOLUTION: wait until session_data persists, then just have "kallsyms_analysed" flag.
+			#func = self.bv.get_function_at(Architecture['aarch64'].standalone_platform, function_address)
+			#if func == None or (func.name != self.kallsyms['name'][idx]):
+				# then define_auto_symbol + add_function
+
 			self.bv.define_auto_symbol(Symbol(FunctionSymbol, function_address, self.kallsyms['name'][idx]))
 			self.bv.add_function(Architecture['aarch64'].standalone_platform, function_address)
 
