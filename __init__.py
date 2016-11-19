@@ -32,57 +32,25 @@ class AndroidKernelView(BinaryView):
 	def __init__(self, bv):
 		BinaryView.__init__(self, parent_view = bv, file_metadata = bv.file)
 		self.raw = bv
-		#self.vmlinux = bv.read(0, len(bv.file.raw)) # FIXME super inefficient FIXME
 		self.kallsyms = kallsyms
 
-		#self.do_kallsyms() # TODO: work on this..
-
-		# kallsyms_handler doesn't work....
-		s = kallsyms_handler(self, kallsyms) # FIXME: doesn't seem to be working...
+		# TODO: maybe move kallsyms_handler out of AndroidKernelView
+		s = kallsyms_handler(self, kallsyms)
 		s.start()
 
-		'''
-		#for idx in xrange(kallsyms['numsyms']): # FIXME: need to do this, but it will FREEZE the program
-		for idx in xrange(50): # FIXME: this is bad...
-			# keep this
-			if kallsyms['type'][idx] not in ["T", "t"]:
-				continue
-
-			function_address = kallsyms['address'][idx] - 0xffffffc000080000
-
-			if rebase:
-				function_address = kallsyms['address'][idx]
-
-			#reference = "0x%x %c %s" % (function_address, kallsyms['type'][idx], kallsyms['name'][idx])
-			#log(2, reference)
-
-			self.define_auto_symbol(Symbol(FunctionSymbol, function_address, kallsyms['name'][idx]))
-			self.add_function(Architecture['aarch64'].standalone_platform, function_address)
-		'''
-
-	# TAKES ~3 seconds to run entire program via cmdline
 	def do_kallsyms(self):
 		"""
 			first function executed
 
-			[address_table][??]
-
 		"""
-		# [FAIL] assert vmlinux == bv.file.raw
-		# [FAIL] assert vmlinux == bv
 
-		# log(3, type(vmlinux)) # string
-		# log(3, type(bv.file.raw)) # binaryninja.BinaryView
-
-		#
-
-		self.kallsyms['arch'] = 64 # assert(kallsyms['arch'] == 64)
+		self.kallsyms['arch'] = 64
 		step = self.kallsyms['arch'] / 8
 
 		offset = 0
-		vmlen = len(self.vmlinux) # bv.file.raw)
+		vmlen = len(self.vmlinux)
 		while offset+step < vmlen:
-			num = self.do_address_table(offset) # replacing vmlinux with bv works, but may take longer
+			num = self.do_address_table(offset)
 			if num > 40000:
 				self.kallsyms['numsyms'] = num
 				break
@@ -97,8 +65,8 @@ class AndroidKernelView(BinaryView):
 		print '[+] kallsyms_address_table = ', hex(offset)
 
 		offset += self.kallsyms['numsyms']*step
-		offset = STRIPZERO(self.vmlinux, offset, step) # TODO: use bv
-		num = INT(offset, self.vmlinux) # TODO: use bv
+		offset = STRIPZERO(self.vmlinux, offset, step)
+		num = INT(offset, self.vmlinux)
 		offset += step
 
 		print '[+] kallsyms_num = ', self.kallsyms['numsyms'], num
@@ -112,12 +80,10 @@ class AndroidKernelView(BinaryView):
 				self.kallsyms['address'].insert(0,0)
 			self.kallsyms['numsyms'] = num
 
-
 		offset = STRIPZERO(self.vmlinux, offset)
 		self.do_name_table(offset)
-		self.do_guess_start_address() # vmlinux is MUCH FASTER than using bv...
+		self.do_guess_start_address()
 
-	# XXX: is this looking for address table??
 	# vmlinux is MUCH faster than using bv..
 	def do_address_table(self, offset):
 		"""
@@ -137,7 +103,7 @@ class AndroidKernelView(BinaryView):
 
 		self.kallsyms['address'] = []
 		for i in xrange(offset, len(self.vmlinux), step):
-			addr = INT(i, self.vmlinux) # was vmlinux
+			addr = INT(i, self.vmlinux)
 			if addr < addr_base:
 				return (i-offset)/step
 			else:
@@ -145,14 +111,13 @@ class AndroidKernelView(BinaryView):
 
 		return 0
 
-	# TODO: vmlinux => bv
 	def do_name_table(self, offset):
 		self.kallsyms['name_table'] = offset
 		print '[+] kallsyms_name_table = ', hex(offset)
 
 		for i in xrange(self.kallsyms['numsyms']):
-			length = ord(self.vmlinux[offset]) # how is bv.file.raw is not working??
-			offset += length+1
+			length = ord(self.vmlinux[offset])
+			offset += length + 1
 		while offset%4 != 0:
 			offset += 1
 		offset = STRIPZERO(self.vmlinux, offset)
@@ -162,7 +127,7 @@ class AndroidKernelView(BinaryView):
 		# decompress name and type
 		name_offset = 0
 		for i in xrange(self.kallsyms['numsyms']):
-			offset = self.kallsyms['name_table']+name_offset
+			offset = self.kallsyms['name_table'] + name_offset
 			length = ord(self.vmlinux[offset])
 
 			offset += 1
@@ -171,9 +136,9 @@ class AndroidKernelView(BinaryView):
 			name = ''
 			while length:
 				token_index_table_offset = ord(self.vmlinux[offset])
-				xoffset = self.kallsyms['token_index_table']+token_index_table_offset*2
+				xoffset = self.kallsyms['token_index_table'] + token_index_table_offset*2
 				token_table_offset = SHORT(xoffset, self.vmlinux)
-				strptr = self.kallsyms['token_table']+token_table_offset
+				strptr = self.kallsyms['token_table'] + token_table_offset
 
 				while ord(self.vmlinux[strptr]):
 					name += '%c' % ord(self.vmlinux[strptr])
@@ -250,6 +215,10 @@ class AndroidKernelView(BinaryView):
 			# print '[+] kallsyms_guess_start_addresses = ',  hex(0xffffffc000000000 + INT(8, self.vmlinux)) if kallsyms['arch']==64 else '', hex(_startaddr_from_xstext), hex(_startaddr_from_banner), hex(_startaddr_from_processor)
 			print '[+] kallsyms_guess_start_addresses = ',  hex(0xffffffc000000000 + INT(8, self.vmlinux)) if self.kallsyms['arch']==64 else '', hex(_startaddr_from_xstext), hex(_startaddr_from_processor)
 
+		#
+		# TODO: kallsyms_guess_start_addresses will be used for rebase
+		#
+
 		return kallsyms['_start']
 
 	def do_token_index_table(self, offset):
@@ -274,15 +243,14 @@ class AndroidKernelView(BinaryView):
 		self.kallsyms['marker_table'] = offset
 		print '[+] kallsyms_marker_table = ', hex(offset)
 
-		offset += (((self.kallsyms['numsyms']-1)>>8)+1)*(self.kallsyms['arch']/8)
+		offset += (((self.kallsyms['numsyms']-1)>>8)+1) * (self.kallsyms['arch']/8)
 		offset = STRIPZERO(self.vmlinux, offset)
 
 		self.do_token_table(offset)
 
-	# TODO: vmlinux => bv
 	def do_type_table(self, offset):
 		flag = True
-		for i in xrange(offset,offset+256*4,4):
+		for i in xrange(offset, offset+256*4, 4):
 			if INT(i, self.vmlinux) & ~0x20202020 != 0x54545454:
 				flag = False
 				break
@@ -348,26 +316,24 @@ class AndroidKernelView(BinaryView):
 
 
 class kallsyms_handler(BackgroundTaskThread, AndroidKernelView):
-	# I believe __init__ isn't threaded, so keep heavy lifting out if it.
+	# __init__ isn't threaded AFAIK, so keep heavy lifting out if it.
 	def __init__(self, bv, kallsyms):
 		BackgroundTaskThread.__init__(self, "kallsyms_handler initiated", True)
 		self.kallsyms = kallsyms
 		self.bv = bv
 
 	def run(self):
-		self.vmlinux = self.bv.read(0, len(self.bv.file.raw)) # FIXME super inefficient FIXME
+		# using vmlinux instead of bv is actually MUCH FASTER
+		self.vmlinux = self.bv.read(0, len(self.bv.file.raw))
 
-		# TODO: thread do_kallsyms better?
+		# TODO: thread do_kallsyms better
 		self.do_kallsyms() # TODO: work on this..
 
-		# FIXME: split it up...
 		for idx in xrange(kallsyms['numsyms']):
-		#for idx in xrange(50): # FIXME: this is not working...
 			# keep this
 			if self.kallsyms['type'][idx] not in ["T", "t"]:
 				continue
 
-			# NOTE: the logging IS working
 			#reference = "%x %c %s" % (self.kallsyms['address'][idx], self.kallsyms['type'][idx], self.kallsyms['name'][idx])
 			#log(2, reference) # working...
 			#log(2, rebase) # working...
@@ -378,10 +344,8 @@ class kallsyms_handler(BackgroundTaskThread, AndroidKernelView):
 			if rebase:
 				function_address = self.kallsyms['address'][idx]
 
-			# XXX: why isn't this working...
 			self.bv.define_auto_symbol(Symbol(FunctionSymbol, function_address, self.kallsyms['name'][idx]))
 			self.bv.add_function(Architecture['aarch64'].standalone_platform, function_address)
-
 
 class AndroidKernelViewBank(AndroidKernelView):
 	name = "Android kernel"
@@ -419,5 +383,3 @@ def STRIPZERO(vmlinux, offset, step=4):
 	for i in xrange(offset,len(vmlinux),step):
 		if NOTZERO(i, vmlinux):
 			return i
-
-#//////////////////////
