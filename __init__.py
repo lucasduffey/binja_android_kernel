@@ -32,30 +32,27 @@ class kallsyms_handler(BackgroundTaskThread):
 		self.bv = bv
 
 	def run(self):
-		kallsyms = self.kallsyms
-		bv = self.bv
-
 		# FIXME: split it up...
 		#for idx in xrange(kallsyms['numsyms']):
 		for idx in xrange(50): # FIXME: this is not working...
 			# keep this
-			if kallsyms['type'][idx] not in ["T", "t"]:
+			if self.kallsyms['type'][idx] not in ["T", "t"]:
 				continue
 
 			# NOTE: the logging IS working
-			#reference = "%x %c %s" % (kallsyms['address'][idx], kallsyms['type'][idx], kallsyms['name'][idx])
+			#reference = "%x %c %s" % (self.kallsyms['address'][idx], self.kallsyms['type'][idx], self.kallsyms['name'][idx])
 			#log(2, reference) # working...
 			#log(2, rebase) # working...
 
-			function_address = kallsyms['address'][idx] - 0xffffffc000080000
+			function_address = self.kallsyms['address'][idx] - 0xffffffc000080000
 
 			# rebase is correct value during testing...
 			if rebase:
-				function_address = kallsyms['address'][idx]
+				function_address = self.kallsyms['address'][idx]
 
 			# XXX: why isn't this working...
-			bv.define_auto_symbol(Symbol(FunctionSymbol, function_address, kallsyms['name'][idx]))
-			bv.add_function(Architecture['aarch64'].standalone_platform, function_address)
+			self.bv.define_auto_symbol(Symbol(FunctionSymbol, function_address, self.kallsyms['name'][idx]))
+			self.bv.add_function(Architecture['aarch64'].standalone_platform, function_address)
 
 class AndroidKernelView(BinaryView):
 	name = "Android Kernel"
@@ -64,8 +61,10 @@ class AndroidKernelView(BinaryView):
 	def __init__(self, bv):
 		BinaryView.__init__(self, parent_view = bv, file_metadata = bv.file)
 		self.raw = bv
+		self.vmlinux = bv.read(0, len(bv.file.raw)) # FIXME super inefficient FIXME
+		self.kallsyms = kallsyms
 
-		do_kallsyms(bv, kallsyms) # TODO: work on this..
+		self.do_kallsyms() # TODO: work on this..
 
 		# kallsyms_handler doesn't work....
 		#s = kallsyms_handler(kallsyms, bv) # FIXME: doesn't seem to be working...
@@ -89,6 +88,247 @@ class AndroidKernelView(BinaryView):
 			self.define_auto_symbol(Symbol(FunctionSymbol, function_address, kallsyms['name'][idx]))
 			self.add_function(Architecture['aarch64'].standalone_platform, function_address)
 		#'''
+
+	# TAKES ~3 seconds to run entire program via cmdline
+	def do_kallsyms(self):
+		"""
+			first function executed
+
+			[address_table][??]
+
+		"""
+		# [FAIL] assert vmlinux == bv.file.raw
+		# [FAIL] assert vmlinux == bv
+
+		# log(3, type(vmlinux)) # string
+		# log(3, type(bv.file.raw)) # binaryninja.BinaryView
+
+		#
+
+		self.kallsyms['arch'] = 64 # assert(kallsyms['arch'] == 64)
+		step = self.kallsyms['arch'] / 8
+
+		offset = 0
+		vmlen = len(self.vmlinux) # bv.file.raw)
+		while offset+step < vmlen:
+			num = self.do_address_table(offset) # replacing vmlinux with bv works, but may take longer
+			if num > 40000:
+				self.kallsyms['numsyms'] = num
+				break
+			else:
+				offset += (num+1)*step
+
+		if self.kallsyms['numsyms'] == 0:
+			print '[!] lookup_address_table error...'
+			return
+
+		self.kallsyms['address_table'] = offset
+		print '[+] kallsyms_address_table = ', hex(offset)
+
+		offset += self.kallsyms['numsyms']*step
+		offset = STRIPZERO(self.vmlinux, offset, step) # TODO: use bv
+		num = INT(offset, self.vmlinux) # TODO: use bv
+		offset += step
+
+		print '[+] kallsyms_num = ', self.kallsyms['numsyms'], num
+		if abs(num-self.kallsyms['numsyms']) > 128:
+				self.kallsyms['numsyms'] = 0
+				print '  [!] not equal, maybe error...'
+				return
+
+		if num > self.kallsyms['numsyms']:
+			for i in xrange(self.kallsyms['numsyms'],num):
+				self.kallsyms['address'].insert(0,0)
+			self.kallsyms['numsyms'] = num
+
+
+		offset = STRIPZERO(self.vmlinux, offset)
+		self.do_name_table(offset)
+		self.do_guess_start_address() # vmlinux is MUCH FASTER than using bv...
+
+	# XXX: is this looking for address table??
+	# vmlinux is MUCH faster than using bv..
+	def do_address_table(self, offset):
+		"""
+		vmlinux is self.raw
+
+		returns number of symbols, but if it's less than 40k we don't care so lets return False instead
+
+		"""
+
+		step = self.kallsyms['arch'] / 8
+
+		addr_base = 0xffffffc000000000
+
+		# currently only suport aarch64
+		#if kallsyms['arch'] == 32:
+		#	addr_base = 0xC0000000
+
+		self.kallsyms['address'] = []
+		for i in xrange(offset, len(self.vmlinux), step):
+			addr = INT(i, self.vmlinux) # was vmlinux
+			if addr < addr_base:
+				return (i-offset)/step
+			else:
+				self.kallsyms['address'].append(addr)
+
+		return 0
+
+	# TODO: vmlinux => bv
+	def do_name_table(self, offset):
+		self.kallsyms['name_table'] = offset
+		print '[+] kallsyms_name_table = ', hex(offset)
+
+		for i in xrange(self.kallsyms['numsyms']):
+			length = ord(self.vmlinux[offset]) # how is bv.file.raw is not working??
+			offset += length+1
+		while offset%4 != 0:
+			offset += 1
+		offset = STRIPZERO(self.vmlinux, offset)
+
+		self.do_type_table(offset)
+
+		# decompress name and type
+		name_offset = 0
+		for i in xrange(self.kallsyms['numsyms']):
+			offset = self.kallsyms['name_table']+name_offset
+			length = ord(self.vmlinux[offset])
+
+			offset += 1
+			name_offset += length+1
+
+			name = ''
+			while length:
+				token_index_table_offset = ord(self.vmlinux[offset])
+				xoffset = self.kallsyms['token_index_table']+token_index_table_offset*2
+				token_table_offset = SHORT(xoffset, self.vmlinux)
+				strptr = self.kallsyms['token_table']+token_table_offset
+
+				while ord(self.vmlinux[strptr]):
+					name += '%c' % ord(self.vmlinux[strptr])
+					strptr += 1
+
+				length -= 1
+				offset += 1
+
+			if self.kallsyms['type_table']:
+				self.kallsyms['type'].append('X')
+				self.kallsyms['name'].append(name)
+			else:
+				self.kallsyms['type'].append(name[0])
+				self.kallsyms['name'].append(name[1:])
+
+	def do_guess_start_address(self):
+		_startaddr_from_xstext = 0
+		_startaddr_from_banner = 0
+		_startaddr_from_processor = 0
+
+		for i in xrange(self.kallsyms['numsyms']):
+			if self.kallsyms['name'][i] in ['_text', 'stext', '_stext', '_sinittext', '__init_begin']:
+				if hex(self.kallsyms['address'][i]):
+					if _startaddr_from_xstext==0 or self.kallsyms['address'][i]<_startaddr_from_xstext:
+						_startaddr_from_xstext = self.kallsyms['address'][i]
+
+			# commenting this out because "find" may be annoying to implement for now...
+			#elif kallsyms['name'][i] == 'linux_banner':
+			#	linux_banner_addr = kallsyms['address'][i]
+			#	linux_banner_fileoffset = self.vmlinux.find('Linux version ') # FIXME: use "bv" instead. TODO: bv needs "find"
+
+				#
+				# https://github.com/Vector35/binaryninja-api/blob/dev/python/__init__.py
+				# "class BinaryView" needs "find"
+				# if I use "get_string", it will be effected by rebasing..
+
+			#	if linux_banner_fileoffset:
+			#		_startaddr_from_banner = linux_banner_addr - linux_banner_fileoffset
+
+			elif self.kallsyms['name'][i] == '__lookup_processor_type_data':
+				lookup_processor_addr = self.kallsyms['address'][i]
+
+				step = self.kallsyms['arch'] / 8
+				if self.kallsyms['arch'] == 32:
+					addr_base = 0xC0008000
+				else:
+					addr_base = 0xffffffc000080000
+
+				for i in xrange(0,0x100000,step):
+					_startaddr_from_processor = addr_base + i
+					fileoffset = lookup_processor_addr - _startaddr_from_processor
+					if lookup_processor_addr == INT(fileoffset, self.vmlinux):
+						break
+
+				if _startaddr_from_processor == _startaddr_from_processor+0x100000:
+					_startaddr_from_processor = 0
+
+		#if _startaddr_from_banner:
+		#	self.kallsyms['_start'] = _startaddr_from_banner
+		if _startaddr_from_processor: # was an "elif" statement
+			self.kallsyms['_start'] = _startaddr_from_processor
+		elif _startaddr_from_xstext:
+			self.kallsyms['_start'] = _startaddr_from_xstext
+
+		if self.kallsyms['arch']==64 and _startaddr_from_banner!=_startaddr_from_xstext:
+			 self.kallsyms['_start'] = 0xffffffc000000000 + INT(8, self.vmlinux)
+
+		#kallsyms_guess_start_addresses = [hex(0xffffffc000000000 + INT(8, self.vmlinux)), hex(_startaddr_from_xstext), hex(_startaddr_from_banner), hex(_startaddr_from_processor)]
+		kallsyms_guess_start_addresses = [hex(0xffffffc000000000 + INT(8, self.vmlinux)), hex(_startaddr_from_xstext), hex(_startaddr_from_processor)]
+
+		if len(set(kallsyms_guess_start_addresses)) == 1:
+			print '[+] kallsyms_guess_start_addresses = ', kallsyms_guess_start_addresses[0]
+		else:
+			# print '[+] kallsyms_guess_start_addresses = ',  hex(0xffffffc000000000 + INT(8, self.vmlinux)) if kallsyms['arch']==64 else '', hex(_startaddr_from_xstext), hex(_startaddr_from_banner), hex(_startaddr_from_processor)
+			print '[+] kallsyms_guess_start_addresses = ',  hex(0xffffffc000000000 + INT(8, self.vmlinux)) if self.kallsyms['arch']==64 else '', hex(_startaddr_from_xstext), hex(_startaddr_from_processor)
+
+		return kallsyms['_start']
+
+	def do_token_index_table(self, offset):
+		self.kallsyms['token_index_table'] = offset
+		print '[+] kallsyms_token_index_table = ', hex(offset)
+
+	def do_token_table(self, offset):
+		self.kallsyms['token_table'] = offset
+		print '[+] kallsyms_token_table = ', hex(offset)
+
+		for i in xrange(offset, len(self.vmlinux)):
+			if SHORT(i, self.vmlinux) == 0:
+				break
+		for i in xrange(i, len(self.vmlinux)):
+			if ord(self.vmlinux[i]):
+				break
+		offset = i-2
+
+		self.do_token_index_table(offset)
+
+	def do_marker_table(self, offset):
+		self.kallsyms['marker_table'] = offset
+		print '[+] kallsyms_marker_table = ', hex(offset)
+
+		offset += (((self.kallsyms['numsyms']-1)>>8)+1)*(self.kallsyms['arch']/8)
+		offset = STRIPZERO(self.vmlinux, offset)
+
+		self.do_token_table(offset)
+
+	# TODO: vmlinux => bv
+	def do_type_table(self, offset):
+		flag = True
+		for i in xrange(offset,offset+256*4,4):
+			if INT(i, self.vmlinux) & ~0x20202020 != 0x54545454:
+				flag = False
+				break
+
+		if flag:
+			self.kallsyms['type_table'] = offset
+
+			while INT(offset, self.vmlinux):
+				offset += (self.kallsyms['arch']/8)
+			offset = STRIPZERO(self.vmlinux, offset)
+		else:
+			self.kallsyms['type_table'] = 0
+
+		print '[+] kallsyms_type_table = ', hex(self.kallsyms['type_table'])
+
+		offset -= 4
+		self.do_marker_table(offset)
 
 	# OK for now...
 	@classmethod
@@ -166,243 +406,10 @@ def SHORT(offset, vmlinux):
 	(num,) = struct.unpack('H', s)
 	return num
 
-def STRIPZERO(bv, offset, step=4):
+def STRIPZERO(vmlinux, offset, step=4):
 	NOTZERO = INT32 if step==4 else INT
-	for i in xrange(offset,len(bv),step):
-		if NOTZERO(i, bv):
+	for i in xrange(offset,len(vmlinux),step):
+		if NOTZERO(i, vmlinux):
 			return i
 
 #//////////////////////
-def do_token_index_table(bv, kallsyms, offset):
-	kallsyms['token_index_table'] = offset
-	print '[+] kallsyms_token_index_table = ', hex(offset)
-
-# TODO: vmlinux => bv
-def do_token_table(bv, kallsyms, offset, vmlinux):
-	kallsyms['token_table'] = offset
-	print '[+] kallsyms_token_table = ', hex(offset)
-
-	for i in xrange(offset, len(bv)):
-		if SHORT(i,vmlinux) == 0:
-			break
-	for i in xrange(i, len(bv)):
-		if ord(vmlinux[i]):
-			break
-	offset = i-2
-
-	do_token_index_table(bv, kallsyms, offset)
-
-# TODO: vmlinux => bv
-def do_marker_table(bv, kallsyms, offset, vmlinux):
-	kallsyms['marker_table'] = offset
-	print '[+] kallsyms_marker_table = ', hex(offset)
-
-	offset += (((kallsyms['numsyms']-1)>>8)+1)*(kallsyms['arch']/8)
-	offset = STRIPZERO(bv, offset)
-
-	do_token_table(bv, kallsyms, offset, vmlinux)
-
-# TODO: vmlinux => bv
-def do_type_table(bv, kallsyms, offset, vmlinux):
-	flag = True
-	for i in xrange(offset,offset+256*4,4):
-		if INT(i, vmlinux) & ~0x20202020 != 0x54545454:
-			flag = False
-			break
-
-	if flag:
-		kallsyms['type_table'] = offset
-
-		while INT(offset, vmlinux):
-			offset += (kallsyms['arch']/8)
-		offset = STRIPZERO(bv, offset)
-	else:
-		kallsyms['type_table'] = 0
-
-	print '[+] kallsyms_type_table = ', hex(kallsyms['type_table'])
-
-	offset -= 4
-	do_marker_table(bv, kallsyms, offset, vmlinux)
-
-# TODO: vmlinux => bv
-def do_name_table(bv, kallsyms, offset, vmlinux):
-	kallsyms['name_table'] = offset
-	print '[+] kallsyms_name_table = ', hex(offset)
-
-	for i in xrange(kallsyms['numsyms']):
-		length = ord(vmlinux[offset]) # how is bv.file.raw is not working??
-		offset += length+1
-	while offset%4 != 0:
-		offset += 1
-	offset = STRIPZERO(bv, offset)
-
-	do_type_table(bv, kallsyms, offset, vmlinux)
-
-	# decompress name and type
-	name_offset = 0
-	for i in xrange(kallsyms['numsyms']):
-		offset = kallsyms['name_table']+name_offset
-		length = ord(vmlinux[offset])
-
-		offset += 1
-		name_offset += length+1
-
-		name = ''
-		while length:
-			token_index_table_offset = ord(vmlinux[offset])
-			xoffset = kallsyms['token_index_table']+token_index_table_offset*2
-			token_table_offset = SHORT(xoffset, vmlinux)
-			strptr = kallsyms['token_table']+token_table_offset
-
-			while ord(vmlinux[strptr]):
-				name += '%c' % ord(vmlinux[strptr])
-				strptr += 1
-
-			length -= 1
-			offset += 1
-
-		if kallsyms['type_table']:
-			kallsyms['type'].append('X')
-			kallsyms['name'].append(name)
-		else:
-			kallsyms['type'].append(name[0])
-			kallsyms['name'].append(name[1:])
-
-def do_guess_start_address(bv, kallsyms, vmlinux):
-	_startaddr_from_xstext = 0
-	_startaddr_from_banner = 0
-	_startaddr_from_processor = 0
-
-	for i in xrange(kallsyms['numsyms']):
-		if kallsyms['name'][i] in ['_text', 'stext', '_stext', '_sinittext', '__init_begin']:
-			if hex(kallsyms['address'][i]):
-				if _startaddr_from_xstext==0 or kallsyms['address'][i]<_startaddr_from_xstext:
-					_startaddr_from_xstext = kallsyms['address'][i]
-
-		elif kallsyms['name'][i] == 'linux_banner':
-			linux_banner_addr = kallsyms['address'][i]
-			linux_banner_fileoffset = vmlinux.find('Linux version ') # FIXME: use "bv" instead
-			if linux_banner_fileoffset:
-				_startaddr_from_banner = linux_banner_addr - linux_banner_fileoffset
-
-		elif kallsyms['name'][i] == '__lookup_processor_type_data':
-			lookup_processor_addr = kallsyms['address'][i]
-
-			step = kallsyms['arch'] / 8
-			if kallsyms['arch'] == 32:
-				addr_base = 0xC0008000
-			else:
-				addr_base = 0xffffffc000080000
-
-			for i in xrange(0,0x100000,step):
-				_startaddr_from_processor = addr_base + i
-				fileoffset = lookup_processor_addr - _startaddr_from_processor
-				if lookup_processor_addr == INT(fileoffset, vmlinux):
-					break
-
-			if _startaddr_from_processor == _startaddr_from_processor+0x100000:
-				_startaddr_from_processor = 0
-
-	if _startaddr_from_banner:
-		kallsyms['_start'] = _startaddr_from_banner
-	elif _startaddr_from_processor:
-		kallsyms['_start'] = _startaddr_from_processor
-	elif _startaddr_from_xstext:
-		kallsyms['_start'] = _startaddr_from_xstext
-
-	if kallsyms['arch']==64 and _startaddr_from_banner!=_startaddr_from_xstext:
-		 kallsyms['_start'] = 0xffffffc000000000 + INT(8, vmlinux)
-
-	kallsyms_guess_start_addresses = [hex(0xffffffc000000000 + INT(8, vmlinux)), hex(_startaddr_from_xstext), hex(_startaddr_from_banner), hex(_startaddr_from_processor)]
-
-	if len(set(kallsyms_guess_start_addresses)) == 1:
-		print '[+] kallsyms_guess_start_addresses = ', kallsyms_guess_start_addresses[0]
-	else:
-		print '[+] kallsyms_guess_start_addresses = ',  hex(0xffffffc000000000 + INT(8, vmlinux)) if kallsyms['arch']==64 else '', hex(_startaddr_from_xstext), hex(_startaddr_from_banner), hex(_startaddr_from_processor)
-
-	return kallsyms['_start']
-
-# XXX: is this looking for address table??
-def do_address_table(bv, kallsyms, offset, vmlinux):
-	"""
-	vmlinux is self.raw
-
-	returns number of symbols, but if it's less than 40k we don't care so lets return False instead
-
-	"""
-
-	step = kallsyms['arch'] / 8
-
-	addr_base = 0xffffffc000000000
-
-	# currently only suport aarch64
-	#if kallsyms['arch'] == 32:
-	#	addr_base = 0xC0000000
-
-	kallsyms['address'] = []
-	for i in xrange(offset, len(bv), step):
-		addr = INT(i, bv) # was vmlinux
-		if addr < addr_base:
-			return (i-offset)/step
-		else:
-			kallsyms['address'].append(addr)
-
-	return 0
-
-# TAKES ~3 seconds to run entire program via cmdline
-def do_kallsyms(bv, kallsyms):
-	"""
-		first function executed
-
-		[address_table][??]
-
-		vmlinux is self.raw....
-
-	"""
-	vmlinux = bv.read(0, len(bv)) # FIXME super inefficient FIXME
-
-	# [FAIL] assert vmlinux == bv.file.raw
-	# [FAIL] assert vmlinux == bv
-
-	# log(3, type(vmlinux)) # string
-	# log(3, type(bv.file.raw)) # binaryninja.BinaryView
-
-	kallsyms['arch'] = 64 # assert(kallsyms['arch'] == 64)
-	step = kallsyms['arch'] / 8
-
-	offset = 0
-	vmlen = len(bv)
-	while offset+step < vmlen:
-		num = do_address_table(bv, kallsyms, offset, vmlinux) # FIXME: remove vmlinux arg
-		if num > 40000:
-			kallsyms['numsyms'] = num
-			break
-		else:
-			offset += (num+1)*step
-
-	if kallsyms['numsyms'] == 0:
-		print '[!]lookup_address_table error...'
-		return
-
-	kallsyms['address_table'] = offset
-	print '[+]kallsyms_address_table = ', hex(offset)
-
-	offset += kallsyms['numsyms']*step
-	offset = STRIPZERO(bv, offset, step) # TODO: use bv
-	num = INT(offset, vmlinux) # TODO: use bv
-	offset += step
-
-	print '[+] kallsyms_num = ', kallsyms['numsyms'], num
-	if abs(num-kallsyms['numsyms']) > 128:
-			kallsyms['numsyms'] = 0
-			print '  [!]not equal, maybe error...'
-			return
-
-	if num > kallsyms['numsyms']:
-		for i in xrange(kallsyms['numsyms'],num):
-			kallsyms['address'].insert(0,0)
-		kallsyms['numsyms'] = num
-
-	offset = STRIPZERO(bv, offset)
-	do_name_table(bv, kallsyms, offset, vmlinux)
-	do_guess_start_address(bv, kallsyms, vmlinux)
