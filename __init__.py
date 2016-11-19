@@ -62,14 +62,14 @@ class AndroidKernelView(BinaryView):
 			return
 
 		self.kallsyms['address_table'] = offset
-		print '[+] kallsyms_address_table = ', hex(offset)
+		#print '[+] kallsyms_address_table = ', hex(offset) # TODO: use this
 
 		offset += self.kallsyms['numsyms']*step
 		offset = STRIPZERO(self.vmlinux, offset, step)
 		num = INT(offset, self.vmlinux)
 		offset += step
 
-		print '[+] kallsyms_num = ', self.kallsyms['numsyms'], num
+		#print '[+] kallsyms_num = ', self.kallsyms['numsyms'], num # TODO: use this
 		if abs(num-self.kallsyms['numsyms']) > 128:
 				self.kallsyms['numsyms'] = 0
 				print '  [!] not equal, maybe error...'
@@ -113,7 +113,7 @@ class AndroidKernelView(BinaryView):
 
 	def do_name_table(self, offset):
 		self.kallsyms['name_table'] = offset
-		print '[+] kallsyms_name_table = ', hex(offset)
+		#print '[+] kallsyms_name_table = ', hex(offset) # TODO: use this
 
 		for i in xrange(self.kallsyms['numsyms']):
 			length = ord(self.vmlinux[offset])
@@ -209,11 +209,14 @@ class AndroidKernelView(BinaryView):
 		#kallsyms_guess_start_addresses = [hex(0xffffffc000000000 + INT(8, self.vmlinux)), hex(_startaddr_from_xstext), hex(_startaddr_from_banner), hex(_startaddr_from_processor)]
 		kallsyms_guess_start_addresses = [hex(0xffffffc000000000 + INT(8, self.vmlinux)), hex(_startaddr_from_xstext), hex(_startaddr_from_processor)]
 
+		# TODO: use this
+		'''
 		if len(set(kallsyms_guess_start_addresses)) == 1:
 			print '[+] kallsyms_guess_start_addresses = ', kallsyms_guess_start_addresses[0]
 		else:
 			# print '[+] kallsyms_guess_start_addresses = ',  hex(0xffffffc000000000 + INT(8, self.vmlinux)) if kallsyms['arch']==64 else '', hex(_startaddr_from_xstext), hex(_startaddr_from_banner), hex(_startaddr_from_processor)
 			print '[+] kallsyms_guess_start_addresses = ',  hex(0xffffffc000000000 + INT(8, self.vmlinux)) if self.kallsyms['arch']==64 else '', hex(_startaddr_from_xstext), hex(_startaddr_from_processor)
+		'''
 
 		#
 		# TODO: kallsyms_guess_start_addresses will be used for rebase
@@ -223,11 +226,11 @@ class AndroidKernelView(BinaryView):
 
 	def do_token_index_table(self, offset):
 		self.kallsyms['token_index_table'] = offset
-		print '[+] kallsyms_token_index_table = ', hex(offset)
+		# print '[+] kallsyms_token_index_table = ', hex(offset) # TODO: use this
 
 	def do_token_table(self, offset):
 		self.kallsyms['token_table'] = offset
-		print '[+] kallsyms_token_table = ', hex(offset)
+		# print '[+] kallsyms_token_table = ', hex(offset) # TODO: use this
 
 		for i in xrange(offset, len(self.vmlinux)):
 			if SHORT(i, self.vmlinux) == 0:
@@ -241,7 +244,7 @@ class AndroidKernelView(BinaryView):
 
 	def do_marker_table(self, offset):
 		self.kallsyms['marker_table'] = offset
-		print '[+] kallsyms_marker_table = ', hex(offset)
+		# print '[+] kallsyms_marker_table = ', hex(offset) # TODO: use this
 
 		offset += (((self.kallsyms['numsyms']-1)>>8)+1) * (self.kallsyms['arch']/8)
 		offset = STRIPZERO(self.vmlinux, offset)
@@ -264,7 +267,7 @@ class AndroidKernelView(BinaryView):
 		else:
 			self.kallsyms['type_table'] = 0
 
-		print '[+] kallsyms_type_table = ', hex(self.kallsyms['type_table'])
+		# print '[+] kallsyms_type_table = ', hex(self.kallsyms['type_table']) # TODO: use this
 
 		offset -= 4
 		self.do_marker_table(offset)
