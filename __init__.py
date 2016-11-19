@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# original author: nforest@k33nteam.org
+# ported code from https://github.com/nforest/droidimg
 
 import os
 import re
