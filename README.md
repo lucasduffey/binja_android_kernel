@@ -5,7 +5,7 @@ git clone https://github.com/lucasduffey/binja_android_kernel
 ```
 
 # Usage
-expects decompressed zImage
+This plugin expects a decompressed zImage.
 
 Factory Nexus + Pixel firmware is stored at https://developers.google.com/android/images. The firmware contains a boot.img, which contains zImage.gz + initrd.
 
